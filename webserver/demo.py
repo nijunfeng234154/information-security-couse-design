@@ -327,80 +327,72 @@ def encode_image(img):
 
 def add_noise(img, choice):
     if choice == '1':
-        # 压缩变换
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # 设置压缩质量
-        _, encimg = cv2.imencode('.png', img, encode_param)
+        # Compression Transform: Increase JPEG quality to reduce artifacts
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]  # Increased from 50 to 80
+        _, encimg = cv2.imencode('.jpg', img, encode_param)
         img = cv2.imdecode(encimg, 1)
     elif choice == '2':
-        # 随机裁剪
+        # Reduced Random Cropping: Crop less of the image
         h, w, _ = img.shape
-        top = np.random.randint(0, h // 4)
-        left = np.random.randint(0, w // 4)
-        bottom = np.random.randint(3 * h // 4, h)
-        right = np.random.randint(3 * w // 4, w)
+        crop_ratio = 0.1  # Crop 10% from each side
+        top = int(h * crop_ratio)
+        bottom = int(h * (1 - crop_ratio))
+        left = int(w * crop_ratio)
+        right = int(w * (1 - crop_ratio))
         img = img[top:bottom, left:right]
     elif choice == '3':
-        # 随机加高斯噪声或椒盐噪声
+        # Reduced Noise Intensity
         if np.random.rand() > 0.5:
-            # 高斯噪声
+            # Gaussian Noise: Reduce sigma to decrease intensity
             mean = 0
-            sigma = 25
+            sigma = 10  # Reduced from 25 to 10
             gauss = np.random.normal(mean, sigma, img.shape).astype('uint8')
             img = cv2.add(img, gauss)
         else:
-            # 椒盐噪声
+            # Salt-and-Pepper Noise: Reduce amount to decrease intensity
             s_vs_p = 0.5
-            amount = 0.04
+            amount = 0.01  # Reduced from 0.04 to 0.01
             out = np.copy(img)
             # Salt mode
             num_salt = np.ceil(amount * img.size * s_vs_p)
             coords = [np.random.randint(0, i - 1, int(num_salt)) for i in img.shape]
-            out[coords[0], coords[1], :] = 1
+            out[tuple(coords)] = 255  # Corrected from 1 to 255 for proper salt effect
 
             # Pepper mode
             num_pepper = np.ceil(amount * img.size * (1. - s_vs_p))
             coords = [np.random.randint(0, i - 1, int(num_pepper)) for i in img.shape]
-            out[coords[0], coords[1], :] = 0
+            out[tuple(coords)] = 0
             img = out
-    elif choice == 4:
-        # 模拟光线变化的影响噪声
-        value = np.random.randint(-50, 50)
+    elif choice == '4':
+        # Lighting Changes: Reduce range to make adjustments less drastic
+        value = np.random.randint(-20, 20)  # Reduced from -50 to 50
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
         v = cv2.add(v, value)
-        v[v > 255] = 255
-        v[v < 0] = 0
+        v = np.clip(v, 0, 255).astype(hsv.dtype)
         final_hsv = cv2.merge((h, s, v))
         img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-    
+
     img_base64 = encode_image(img)
     return img_base64
-    # response = make_response(jsonify({"status": "success", "data": img_base64}), 200)
-    # response.headers.add('Access-Control-Allow-Origin', '*')
-    # return response
 
 @app.route('/noise', methods=['POST'])
 def noise():
-    logger.info("接收到噪声请求")
-    logger.info("开始解析请求体")
-    data = request.get_json(force=True)  # 确保可以解析JSON
+    logger.info("Received noise request")
+    data = request.get_json(force=True)
     origin_image_base64 = data.get("image")
-    #choice参数决定加哪些噪声
     choice = data.get("choice")
 
     if origin_image_base64 is None or choice is None:
         return jsonify({"error": "Invalid input"}), 400
 
     img = decode_image(origin_image_base64)
-    img_with_noise = add_noise(img, choice)
-    #格式转换
-    img_data = base64.b64decode(img_with_noise)
-    np_arr = np.frombuffer(img_data, np.uint8)
-    result_image_base64 = encode_image(np_arr)
+    img_with_noise_base64 = add_noise(img, choice)
 
-    response = make_response(jsonify({"status": "success", "data": result_image_base64}), 200)
+    response = make_response(jsonify({"status": "success", "data": img_with_noise_base64}), 200)
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
+
     # return jsonify({"image": result_image_base64})
 
 
