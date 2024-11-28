@@ -1,5 +1,6 @@
 from typing import Optional, Union, Tuple, List, Callable, Dict
 from diffusers import StableDiffusionPipeline, DDIMScheduler
+from flask_socketio import SocketIO, emit
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask import make_response, jsonify
@@ -11,14 +12,18 @@ from tqdm import tqdm
 import numpy as np
 import argparse
 import binascii
-from io import BytesIO
 import base64
 import torch
 import cv2
 import os
 
+
+#配置跨域请求
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+#配置socketio
+# socketio = SocketIO(app)
+
 scheduler = DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False,
                           set_alpha_to_one=False)
 MY_TOKEN = ''
@@ -26,8 +31,10 @@ LOW_RESOURCE = False
 GUIDANCE_SCALE = 1.0
 MAX_NUM_WORDS = 77
 device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+logger.info(f"Using device: {device}")
 ldm_stable = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", use_auth_token=MY_TOKEN,
                                                      scheduler=scheduler).to(device)
+
 
 try:
     ldm_stable.disable_xformers_memory_efficient_attention()
@@ -51,7 +58,6 @@ def load_image(image_path, left=0, right=0, top=0, bottom=0, resize=False):
                                        )
         image = np.array(padded_image)
     return image, h, w
-
 
 class ODESolve:
 
@@ -211,9 +217,11 @@ def AuxReply(code, msg, data, fcode=200):
     return jsonify({"code": code, "msg": msg, "data": data}), fcode
 
 
-@app.route("/hello", methods=['GET'])
-def sayhello():
-    return AuxReply(200, "ok", "hello")
+@app.route('/logs', methods=['GET'])
+def get_logs():
+    with open('app.log', 'r') as f:
+        logs = f.readlines()
+    return jsonify(logs)
 
 @logger.catch()
 @app.route('/encrypt', methods=['POST'])
@@ -305,6 +313,96 @@ def decrypt(image_hide_base64, pub, key, save_file: str):
     return response
     # return AuxReply(200, "success", image_reverse_base64)
 
+#处理加噪声
+def decode_image(base64_str):
+    img_data = base64.b64decode(base64_str)
+    np_arr = np.frombuffer(img_data, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    return img
+
+def encode_image(img):
+    _, buffer = cv2.imencode('.png', img)
+    img_base64 = base64.b64encode(buffer).decode('utf-8')
+    return img_base64
+
+def add_noise(img, choice):
+    if choice == '1':
+        # 压缩变换
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # 设置压缩质量
+        _, encimg = cv2.imencode('.png', img, encode_param)
+        img = cv2.imdecode(encimg, 1)
+    elif choice == '2':
+        # 随机裁剪
+        h, w, _ = img.shape
+        top = np.random.randint(0, h // 4)
+        left = np.random.randint(0, w // 4)
+        bottom = np.random.randint(3 * h // 4, h)
+        right = np.random.randint(3 * w // 4, w)
+        img = img[top:bottom, left:right]
+    elif choice == '3':
+        # 随机加高斯噪声或椒盐噪声
+        if np.random.rand() > 0.5:
+            # 高斯噪声
+            mean = 0
+            sigma = 25
+            gauss = np.random.normal(mean, sigma, img.shape).astype('uint8')
+            img = cv2.add(img, gauss)
+        else:
+            # 椒盐噪声
+            s_vs_p = 0.5
+            amount = 0.04
+            out = np.copy(img)
+            # Salt mode
+            num_salt = np.ceil(amount * img.size * s_vs_p)
+            coords = [np.random.randint(0, i - 1, int(num_salt)) for i in img.shape]
+            out[coords[0], coords[1], :] = 1
+
+            # Pepper mode
+            num_pepper = np.ceil(amount * img.size * (1. - s_vs_p))
+            coords = [np.random.randint(0, i - 1, int(num_pepper)) for i in img.shape]
+            out[coords[0], coords[1], :] = 0
+            img = out
+    elif choice == 4:
+        # 模拟光线变化的影响噪声
+        value = np.random.randint(-50, 50)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        v = cv2.add(v, value)
+        v[v > 255] = 255
+        v[v < 0] = 0
+        final_hsv = cv2.merge((h, s, v))
+        img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
+    
+    img_base64 = encode_image(img)
+    return img_base64
+    # response = make_response(jsonify({"status": "success", "data": img_base64}), 200)
+    # response.headers.add('Access-Control-Allow-Origin', '*')
+    # return response
+
+@app.route('/noise', methods=['POST'])
+def noise():
+    logger.info("接收到噪声请求")
+    logger.info("开始解析请求体")
+    data = request.get_json(force=True)  # 确保可以解析JSON
+    origin_image_base64 = data.get("image")
+    #choice参数决定加哪些噪声
+    choice = data.get("choice")
+
+    if origin_image_base64 is None or choice is None:
+        return jsonify({"error": "Invalid input"}), 400
+
+    img = decode_image(origin_image_base64)
+    img_with_noise = add_noise(img, choice)
+    #格式转换
+    img_data = base64.b64decode(img_with_noise)
+    np_arr = np.frombuffer(img_data, np.uint8)
+    result_image_base64 = encode_image(np_arr)
+
+    response = make_response(jsonify({"status": "success", "data": result_image_base64}), 200)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
+    # return jsonify({"image": result_image_base64})
+
 
 def demo(params):
     if not os.path.exists(params.save_path):
@@ -342,9 +440,14 @@ def demo(params):
     image_reverse = ode.latent2image(image_reverse_latent)
     cv2.imwrite("{:s}/reverse.png".format(params.save_path), image_reverse)
 
+# 添加SocketIOHandler到logger
+# logger.add(SocketIOHandler(), level='INFO')
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
+    # logger.add("app.log", level='INFO')
+    
+    # socketio.run(app, debug=True)
     # parser = argparse.ArgumentParser()
     # parser.add_argument('--image_path', type=str, default='./asserts/1.png', help='test image path')
     # parser.add_argument('--private_key', type=str, default='Effiel tower', help='text prompt of the private key')
