@@ -54,7 +54,7 @@ const beforeAvatarUpload = (rawFile) => {
   return true
 }
 
-//处理生成载体图像请求,以及解密请求
+//处理生成载体图像请求,以及揭示请求
 const handleSubmit = async (decrypt) => {
   clearOutputImages()
   if (!uploadFile.value || !uploadFile.value.raw) {
@@ -75,7 +75,7 @@ const handleSubmit = async (decrypt) => {
     console.log("发送图片:: ", input1.value, input2.value, decrypt)
     addLog(`发送图片`)
     addLog(`${input1.value} ${input2.value}`) 
-    addLog('是否为解密模式：'+`${decrypt}`)
+    addLog('是否为揭示模式：'+`${decrypt}`)
     addLog('开始解析请求')
     axios.post('http://127.0.0.1:5000/encrypt', {
       image: imgbase64,
@@ -99,9 +99,9 @@ const handleSubmit = async (decrypt) => {
           return
         } else {
           if (decrypt) {
-            addLog('解密成功')
+            addLog('揭示成功')
           } else {
-            addLog('加密成功')
+            addLog('隐藏成功')
           }
         }
         let base64Image = data.split(';base64,').pop()
@@ -205,7 +205,7 @@ const clearAll = () => {
     <div style="display: flex;justify-content:flex-start;flex-flow:column;">
       <!--      上半部分三个框，第一个框是上传框-->
       <div class="title">
-        <el-span>原始图像生成</el-span>
+        <el-span>原始图像上传</el-span>
         <el-span>载体图像生成</el-span>
         <el-span>加噪图像生成</el-span>
       </div>

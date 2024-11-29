@@ -226,7 +226,7 @@ def get_logs():
 @logger.catch()
 @app.route('/encrypt', methods=['POST'])
 def encrypt():
-    logger.info("接收到加密请求")
+    logger.info("接收到隐藏请求")
     from random import randint
     from datetime import datetime
     save_path = Path("./save/")
@@ -242,7 +242,7 @@ def encrypt():
     prompt_2 = data.get("pub")
     decrypt_flag = bool(data.get("decrypt", False))
 
-    logger.info(f"JSON参数解析完毕，开始转换图片，是否为解密模式: {decrypt_flag}")
+    logger.info(f"JSON参数解析完毕，开始转换图片，是否为揭示模式: {decrypt_flag}")
 
     # 去掉 Base64 编码中的前缀部分
     if origin_image_base64.startswith('data:image'):
@@ -292,7 +292,7 @@ def encrypt():
 
 
 def decrypt(image_hide_base64, pub, key, save_file: str):
-    logger.info(f"开始解密，检查密语 Pub:{pub} Key:{key}")
+    logger.info(f"开始揭示，检查密语 Pub:{pub} Key:{key}")
     image_hide = Image.open(BytesIO(base64.b64decode(image_hide_base64)))
     image_hide = np.array(image_hide)  # Convert PngImageFile to np.ndarray
     rev_prompt_1 = key
@@ -302,7 +302,7 @@ def decrypt(image_hide_base64, pub, key, save_file: str):
     image_reverse_latent = ode.invert(rev_prompt_1, latent_noise, is_forward=False)
     image_reverse = ode.latent2image(image_reverse_latent)
     image_reverse_rgb = cv2.cvtColor(image_reverse, cv2.COLOR_BGR2RGB)
-    logger.success(f"解密完成")
+    logger.success(f"揭示完成")
     _, buffer = cv2.imencode('.png', image_reverse_rgb)
     image_reverse_base64 = base64.b64encode(buffer).decode('utf-8')
     image_reverse_pil = Image.fromarray(image_reverse_rgb)
