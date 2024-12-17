@@ -21,8 +21,7 @@ import os
 #配置跨域请求
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-#配置socketio
-# socketio = SocketIO(app)
+
 
 scheduler = DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False,
                           set_alpha_to_one=False)
@@ -209,6 +208,26 @@ class ODESolve:
         return self.latent2image(image_start_latent), image_start_latent, self.latent2image(latent_n2i[-1]), latent_n2i[
             -1]
 
+# 计算均方误差 (MSE)
+def mse(image1, image2):
+    return np.mean((image1 - image2) ** 2)
+
+# 计算峰值信噪比 (PSNR)
+def psnr(image1, image2):
+    # 首先计算均方误差
+    mse_value = mse(image1, image2)
+    
+    # 如果均方误差为零，则两图完全相同，PSNR为无限大
+    if mse_value == 0:
+        return float('inf')
+    
+    # 图像的最大像素值
+    max_pixel = 255.0
+    
+    # 计算PSNR
+    psnr_value = 10 * np.log10((max_pixel ** 2) / mse_value)
+    return psnr_value
+
 
 ode = ODESolve(ldm_stable, 50)
 
@@ -257,8 +276,9 @@ def encrypt():
     except binascii.Error as e:
         logger.error(f"Base64解码失败: {e}")
         return jsonify({"status": "error", "message": "无效的Base64编码"}), 400
-
-    origin_save = save_path / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{randint(10000, 99999):05}_{'de_origin' if decrypt_flag else 'en_origin'}.png"
+    
+#{datetime.now().strftime('%Y%m%d_%H%M%S')}_{randint(10000, 99999):05}_
+    origin_save = save_path / f"{'de_origin' if decrypt_flag else 'en_origin'}.png"
     origin_image.save(str(origin_save.resolve()))
     assert origin_save.exists() and origin_save.is_file()
 
@@ -285,11 +305,24 @@ def encrypt():
 
     _, buffer = cv2.imencode('.png', container)
     container_base64 = base64.b64encode(buffer).decode('utf-8')
+    
     response = make_response(jsonify({"status": "success", "data": container_base64}), 200)
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
     # return AuxReply(200, "success", container_base64)
 
+
+#处理加噪声
+def decode_image(base64_str):
+    img_data = base64.b64decode(base64_str)
+    np_arr = np.frombuffer(img_data, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    return img
+
+def encode_image(img):
+    _, buffer = cv2.imencode('.png', img)
+    img_base64 = base64.b64encode(buffer).decode('utf-8')
+    return img_base64
 
 def decrypt(image_hide_base64, pub, key, save_file: str):
     logger.info(f"开始揭示，检查密语 Pub:{pub} Key:{key}")
@@ -307,23 +340,25 @@ def decrypt(image_hide_base64, pub, key, save_file: str):
     image_reverse_base64 = base64.b64encode(buffer).decode('utf-8')
     image_reverse_pil = Image.fromarray(image_reverse_rgb)
     image_reverse_pil.save(save_file)
+    save_path = Path("./save/")
+    # image_reverse = decode_image(image_reverse_base64)
+    # image_reverse.save(save_path / f'decode_origin.png')
+    
+    #求原始图像和恢复出的图像的峰值信噪比
+
+    origin_image = cv2.imread(save_path / 'en_origin.png')
+    image_resolve = cv2.imread(save_file)
+    
+    image1 = cv2.cvtColor(origin_image, cv2.COLOR_BGR2GRAY)
+    image2 = cv2.cvtColor(image_resolve, cv2.COLOR_BGR2GRAY)
+    
+    psnr_value = psnr(image1, image2)
+
     #可能也需要加header
-    response = make_response(jsonify({"status": "success", "data": image_reverse_base64}), 200)
+    response = make_response(jsonify({"status": "success", "data": image_reverse_base64, "psnr":psnr_value}), 200)
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
     # return AuxReply(200, "success", image_reverse_base64)
-
-#处理加噪声
-def decode_image(base64_str):
-    img_data = base64.b64decode(base64_str)
-    np_arr = np.frombuffer(img_data, np.uint8)
-    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    return img
-
-def encode_image(img):
-    _, buffer = cv2.imencode('.png', img)
-    img_base64 = base64.b64encode(buffer).decode('utf-8')
-    return img_base64
 
 def add_noise(img, choice):
     if choice == '1':
@@ -365,7 +400,7 @@ def add_noise(img, choice):
             img = out
     elif choice == '4':
         # Lighting Changes: Reduce range to make adjustments less drastic
-        value = np.random.randint(-20, 20)  # Reduced from -50 to 50
+        value = np.random.randint(-20,20)  # Reduced from -50 to 50
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
         v = cv2.add(v, value)
@@ -395,6 +430,19 @@ def noise():
 
     # return jsonify({"image": result_image_base64})
 
+# def find_fsr(image):
+#     scale_factor = 2
+#     height, width = image.shape[:2]
+#     new_dimensions = (width * scale_factor, height * scale_factor)
+#     fsr_image = cv2.resize(image, new_dimensions, interpolation=cv2.INTER_CUBIC)
+#     return fsr_image
+
+
+    
+
+    # response = make_response(jsonify({"status": "success", "data": img_with_noise_base64}), 200)
+    # response.headers.add('Access-Control-Allow-Origin', '*')
+    # return response
 
 def demo(params):
     if not os.path.exists(params.save_path):
@@ -440,11 +488,14 @@ if __name__ == "__main__":
     # logger.add("app.log", level='INFO')
     
     # socketio.run(app, debug=True)
+    # demo(args)
     # parser = argparse.ArgumentParser()
     # parser.add_argument('--image_path', type=str, default='./asserts/1.png', help='test image path')
     # parser.add_argument('--private_key', type=str, default='Effiel tower', help='text prompt of the private key')
     # parser.add_argument('--public_key', type=str, default='a tree', help='text prompt of the public key')
     # parser.add_argument('--save_path', type=str, default='./output', help='text prompt of the public key')
     # parser.add_argument('--num_steps', type=int, default=50, help='sampling step of DDIM')
-    # args = parser.parse_args()
-    # demo(args)
+    # parser.add_argument('--guidance_scale', type=float, default=1.0, help='guidance scale for conditional generation')
+    # parser.add_argument('--beta_start', type=float, default=0.00085, help='beta start for DDIM scheduler')
+    # parser.add_argument('--beta_end', type=float, default=0.012, help='beta end for DDIM scheduler')
+    # parser.add_argument('--beta_schedule', type=str, default="scaled_linear", help='beta schedule for DDIM scheduler')

@@ -9,7 +9,7 @@ const NoiseImageUrl = ref('')
 const carrierImageUrl = ref('')
 const uploadRef = ref()
 const uploadFile = ref()
-const input = ref('')
+const psnr = ref(0)
 const resultImageUrl = ref('')
 const resultMsg = ref('')
 const showSidebar = ref(false)
@@ -94,12 +94,14 @@ const handleSubmit = async (decrypt) => {
         addLog("JSON参数解析完毕，开始转换图片")
         let data = res.data.data
         let status = res.data.status
+        let psnr = res.data.psnr
         if (status === 'error') {
           addLog('Base64解码失败:', res.data.code)
           return
         } else {
           if (decrypt) {
             addLog('揭示成功')
+            addLog('恢复出图像和原始图像的峰值信噪比:'+psnr)
           } else {
             addLog('隐藏成功')
           }
