@@ -77,7 +77,7 @@ const handleSubmit = async (decrypt) => {
     addLog(`${input1.value} ${input2.value}`) 
     addLog('是否为揭示模式：'+`${decrypt}`)
     addLog('开始解析请求')
-    axios.post('http://127.0.0.1:5000/encrypt', {
+    axios.post('http://localhost:5000/encrypt', {
       image: imgbase64,
       key: input1.value,
       pub: input2.value,
@@ -161,7 +161,7 @@ const handleNoise = async (choice) => {
       addLog('收到加噪请求：光线变化')
     }
     addLog('正在处理...')
-    axios.post('http://127.0.0.1:5000/noise', {
+    axios.post('http://localhost:5000/noise', {
       image: imgbase64,
       choice: choice
     }, {

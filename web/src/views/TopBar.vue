@@ -1,6 +1,6 @@
 <template>
   <div class="top-bar">
-    <img src="/topbaricon.png" class="icon" alt="Icon">
+    <img src="/logo.png" class="icon" alt="Icon">
     <span class="title">燔石图像隐写平台</span>
   </div>
 </template>
